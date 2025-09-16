@@ -1,4 +1,5 @@
 #import "Volume.h"
+#import <UIKit/UIKit.h>
 
 @implementation Volume {
     NSString *changeCallbackId;
@@ -31,6 +32,16 @@
                                              selector:@selector(handleMediaServicesReset:)
                                                  name:AVAudioSessionMediaServicesWereResetNotification
                                                object:session];
+
+    // 5) When app returns to foreground/active, ensure session is active and push fresh volume
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleAppWillEnterForeground:)
+                                                 name:UIApplicationWillEnterForegroundNotification
+                                               object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleAppDidBecomeActive:)
+                                                 name:UIApplicationDidBecomeActiveNotification
+                                               object:nil];
 }
 
 - (void)dealloc
@@ -88,6 +99,26 @@
                  context:nil];
 }
 
+- (void)handleAppWillEnterForeground:(NSNotification *)notification
+{
+    // Proactively reactivate before becoming active
+    AVAudioSession *session = AVAudioSession.sharedInstance;
+    [session setCategory:AVAudioSessionCategoryPlayback
+             withOptions:AVAudioSessionCategoryOptionMixWithOthers
+                   error:nil];
+    [session setActive:YES error:nil];
+}
+
+- (void)handleAppDidBecomeActive:(NSNotification *)notification
+{
+    // Ensure session is active and send a fresh reading to JS if a callback is registered
+    AVAudioSession *session = AVAudioSession.sharedInstance;
+    [session setActive:YES error:nil];
+    if (changeCallbackId) {
+        [self sendCurrentVolumeTo:changeCallbackId];
+    }
+}
+
 #pragma mark - Helpers ----------------------------------------------------------
 
 - (void)sendCurrentVolumeTo:(NSString *)callbackId
@@ -99,7 +130,10 @@
 
 - (CDVPluginResult *)currentVolume
 {
-    float volume = AVAudioSession.sharedInstance.outputVolume;
+    // Ensure the session is active to avoid stale values after backgrounding
+    AVAudioSession *session = AVAudioSession.sharedInstance;
+    [session setActive:YES error:nil];
+    float volume = session.outputVolume;
     return [CDVPluginResult resultWithStatus:CDVCommandStatus_OK
                               messageAsDouble:volume];
 }
